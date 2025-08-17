@@ -87,6 +87,7 @@ class ScormManager
 
         $zip->close();
         if (!$isScormArchive) {
+            \Log::error('Zip open errorCode: ' . $openValue);
             $this->onError('invalid_scorm_archive_message');
         }
     }
