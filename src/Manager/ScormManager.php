@@ -75,6 +75,53 @@ class ScormManager
     }
 
     /**
+     * Find imsmanifest.xml location in ZIP archive
+     * 
+     * @param \ZipArchive $zip
+     * @return array ['found' => bool, 'path' => string, 'stream' => resource|null]
+     */
+    private function findManifestInZip(\ZipArchive $zip)
+    {
+        // Look for imsmanifest.xml in root directory first
+        $manifestStream = $zip->getStream('imsmanifest.xml');
+        
+        if ($manifestStream) {
+            \Log::info('Found imsmanifest.xml in root directory');
+            return [
+                'found' => true,
+                'path' => 'imsmanifest.xml',
+                'stream' => $manifestStream
+            ];
+        }
+        
+        // Search for imsmanifest.xml in subdirectories
+        \Log::info('imsmanifest.xml not found in root, searching subdirectories...');
+        
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $filename = $zip->getNameIndex($i);
+            
+            // Check if this file is imsmanifest.xml (case insensitive)
+            if (strtolower(basename($filename)) === 'imsmanifest.xml') {
+                $manifestStream = $zip->getStream($filename);
+                if ($manifestStream) {
+                    \Log::info('Found imsmanifest.xml at: ' . $filename);
+                    return [
+                        'found' => true,
+                        'path' => $filename,
+                        'stream' => $manifestStream
+                    ];
+                }
+            }
+        }
+        
+        return [
+            'found' => false,
+            'path' => '',
+            'stream' => null
+        ];
+    }
+
+    /**
      *  Checks if it is a valid scorm archive
      * 
      * @param string|UploadedFile $file zip.       
@@ -82,14 +129,31 @@ class ScormManager
     private function validatePackage($file)
     {
         $zip = new \ZipArchive();
-        $openValue = $zip->open($file);
-        $isScormArchive = (true === $openValue) && $zip->getStream('imsmanifest.xml');
+        $manifestResult = null;
 
-        $zip->close();
-        if (!$isScormArchive) {
-            \Log::error('Zip open errorCode: ' . $openValue);
+        try {
+            $openValue = $zip->open($file);
+            
+            if ($openValue !== true) {
+                \Log::error('Zip open errorCode: ' . $openValue);
+                $this->onError('invalid_scorm_archive_message');
+            }
+
+            $manifestResult = $this->findManifestInZip($zip);
+        } finally {
+            // Always close resources
+            if ($manifestResult && $manifestResult['stream'] && is_resource($manifestResult['stream'])) {
+                fclose($manifestResult['stream']);
+            }
+            $zip->close();
+        }
+        
+        if (!$manifestResult['found']) {
+            \Log::error('imsmanifest.xml not found anywhere in the ZIP archive');
             $this->onError('invalid_scorm_archive_message');
         }
+
+        \Log::info('SCORM archive validation successful. Manifest found at: ' . $manifestResult['path']);
     }
 
     /**
@@ -201,14 +265,32 @@ class ScormManager
         $data = [];
         $contents = '';
         $zip = new \ZipArchive();
+        $manifestResult = null;
 
-        $zip->open($file);
-        $stream = $zip->getStream('imsmanifest.xml');
+        try {
+            $openValue = $zip->open($file);
+            
+            if ($openValue !== true) {
+                \Log::error('Failed to open ZIP file in parseScormArchive. Error code: ' . $openValue);
+                $this->onError('cannot_load_imsmanifest_message');
+            }
+            
+            $manifestResult = $this->findManifestInZip($zip);
+            
+            if (!$manifestResult['found']) {
+                $this->onError('cannot_load_imsmanifest_message');
+            }
 
-        while (!feof($stream)) {
-            $contents .= fread($stream, 2);
+            while (!feof($manifestResult['stream'])) {
+                $contents .= fread($manifestResult['stream'], 2);
+            }
+        } finally {
+            // Always close resources
+            if ($manifestResult && $manifestResult['stream'] && is_resource($manifestResult['stream'])) {
+                fclose($manifestResult['stream']);
+            }
+            $zip->close();
         }
-
 
         $dom = new DOMDocument();
 
