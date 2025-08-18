@@ -334,6 +334,9 @@ class ScormManager
 
         $data['entryUrl'] = $scos[0]->entryUrl ?? $scos[0]->scoChildren[0]->entryUrl;
         $data['scos'] = $scos;
+        
+        // Include manifest path for later use in entry URL adjustment
+        $data['manifestPath'] = $manifestResult['path'];
 
         return $data;
     }
@@ -384,6 +387,17 @@ class ScormManager
          * @param string $hashName name of the destination directory
          */
         $this->scormDisk->unzipper($file, $this->uuid);
+
+        // Update main entry URL to include root path if content is in subdirectory
+        // Use the manifest path we already calculated during parsing
+        if (isset($scormData['manifestPath']) && strpos($scormData['manifestPath'], '/') !== false) {
+            $parentPath = dirname($scormData['manifestPath']);
+            $originalEntryUrl = $scormData['entryUrl'];
+            $scormData['entryUrl'] = $parentPath . '/' . ltrim($scormData['entryUrl'], '/');
+            \Log::info("SCORM content in subdirectory '{$parentPath}'. Entry URL: {$originalEntryUrl} -> {$scormData['entryUrl']}");
+        } else {
+            \Log::info("SCORM content in root directory. Entry URL unchanged: {$scormData['entryUrl']}");
+        }
 
         return [
             'identifier' => $scormData['identifier'],
