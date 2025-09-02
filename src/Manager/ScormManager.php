@@ -211,6 +211,14 @@ class ScormManager
         $scorm->entry_url =   $scormData['entryUrl'];
         $scorm->identifier =   $scormData['identifier'];
         $scorm->origin_file =   $filename;
+        
+        // Auto-detect and set metadata
+        $scorm->metadata = [
+            'package_size' => $this->getFileSize($file),
+            'created_at' => $scormData['created_at'] ?? null,
+            'created_by' => $scormData['created_by'] ?? null
+        ];
+        
         $scorm->save();
 
         if (!empty($scormData['scos']) && is_array($scormData['scos'])) {
@@ -337,6 +345,10 @@ class ScormManager
         
         // Include manifest path for later use in entry URL adjustment
         $data['manifestPath'] = $manifestResult['path'];
+        
+        // Extract creation date and creator from manifest metadata
+        $data['created_at'] = $this->extractCreationDate($dom);
+        $data['created_by'] = $this->extractCreator($dom);
 
         return $data;
     }
@@ -821,6 +833,145 @@ class ScormManager
         }
 
         return $formattedValue;
+    }
+
+    /**
+     * Get file size in bytes
+     * 
+     * @param string|UploadedFile $file
+     * @return int
+     */
+    private function getFileSize($file)
+    {
+        if ($file instanceof UploadedFile) {
+            return $file->getSize();
+        }
+        
+        if (is_string($file) && file_exists($file)) {
+            return filesize($file);
+        }
+        
+        return 0;
+    }
+
+    /**
+     * Extract creation date from SCORM manifest metadata following SCORM standards
+     */
+    private function extractCreationDate(DOMDocument $dom)
+    {
+        $xpath = new \DOMXPath($dom);
+        
+        // Register common SCORM namespaces
+        $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
+        $xpath->registerNamespace('adlcp', 'http://www.adlnet.org/xsd/adlcp_v1p3');
+        $xpath->registerNamespace('adlseq', 'http://www.adlnet.org/xsd/adlseq_v1p3');
+        $xpath->registerNamespace('adlnav', 'http://www.adlnet.org/xsd/adlnav_v1p3');
+        
+        // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:date/lom:dateTime
+        // Priority 1: Creator/Author contribution date
+        $dateNodes = $xpath->query('//lom:dateTime[ancestor::lom:contribute[lom:role/lom:value[text()="creator" or text()="author"]]]');
+        if ($dateNodes->length > 0) {
+            return $this->formatDate($dateNodes->item(0)->textContent);
+        }
+        
+        // Priority 2: Any contribution date
+        $dateNodes = $xpath->query('//lom:dateTime[ancestor::lom:contribute]');
+        if ($dateNodes->length > 0) {
+            return $this->formatDate($dateNodes->item(0)->textContent);
+        }
+        
+        // Priority 3: Any dateTime in metadata
+        $dateNodes = $xpath->query('//lom:dateTime');
+        if ($dateNodes->length > 0) {
+            return $this->formatDate($dateNodes->item(0)->textContent);
+        }
+        
+        // SCORM 1.2: Look for <schema> and <schemaversion> to get creation context
+        $schemaNodes = $xpath->query('//schema');
+        if ($schemaNodes->length > 0) {
+            $schema = $schemaNodes->item(0)->textContent;
+            if (strpos($schema, 'ADL SCORM') !== false) {
+                // For SCORM 1.2, we might not have creation date in manifest
+                // Return null as it's not standard in SCORM 1.2
+                return null;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Extract creator from SCORM manifest metadata following SCORM standards
+     */
+    private function extractCreator(DOMDocument $dom)
+    {
+        $xpath = new \DOMXPath($dom);
+        
+        // Register common SCORM namespaces
+        $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
+        $xpath->registerNamespace('adlcp', 'http://www.adlnet.org/xsd/adlcp_v1p3');
+        $xpath->registerNamespace('adlseq', 'http://www.adlnet.org/xsd/adlseq_v1p3');
+        $xpath->registerNamespace('adlnav', 'http://www.adlnet.org/xsd/adlnav_v1p3');
+        
+        // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:entity
+        // Priority 1: Creator role
+        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="creator"]]]');
+        if ($entityNodes->length > 0) {
+            return trim($entityNodes->item(0)->textContent);
+        }
+        
+        // Priority 2: Author role
+        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="author"]]]');
+        if ($entityNodes->length > 0) {
+            return trim($entityNodes->item(0)->textContent);
+        }
+        
+        // Priority 3: Publisher role
+        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="publisher"]]]');
+        if ($entityNodes->length > 0) {
+            return trim($entityNodes->item(0)->textContent);
+        }
+        
+        // Priority 4: Any entity in contribute section
+        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute]');
+        if ($entityNodes->length > 0) {
+            return trim($entityNodes->item(0)->textContent);
+        }
+        
+        // Priority 5: Any entity in metadata
+        $entityNodes = $xpath->query('//lom:entity');
+        if ($entityNodes->length > 0) {
+            return trim($entityNodes->item(0)->textContent);
+        }
+        
+        // SCORM 1.2: Look for organization or other creator information
+        // SCORM 1.2 typically doesn't have detailed creator metadata
+        $orgNodes = $xpath->query('//organization');
+        if ($orgNodes->length > 0) {
+            // For SCORM 1.2, we might not have creator info in manifest
+            return null;
+        }
+        
+        return null;
+    }
+
+    /**
+     * Format date string to ISO 8601 format
+     */
+    private function formatDate($dateString)
+    {
+        if (empty($dateString)) {
+            return null;
+        }
+        
+        // Try to parse the date and convert to ISO 8601
+        try {
+            $date = new \DateTime($dateString);
+            return $date->format('c'); // ISO 8601 format
+        } catch (\Exception $e) {
+            // If parsing fails, return the original string
+            return trim($dateString);
+        }
     }
 
     /**

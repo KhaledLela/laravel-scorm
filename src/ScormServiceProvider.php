@@ -39,6 +39,10 @@ class ScormServiceProvider extends ServiceProvider
         ], 'migrations');
 
         $this->publishes([
+            __DIR__ . '/../database/migrations/add_metadata_to_scorm_table.php.stub' => $this->getMigrationFileName('add_metadata_to_scorm_table.php'),
+        ], 'migrations');
+
+        $this->publishes([
             __DIR__ . '/../resources/lang/en-US/scorm.php' => resource_path('lang/en-US/scorm.php'),
         ]);
     }
@@ -54,12 +58,12 @@ class ScormServiceProvider extends ServiceProvider
 
         $filesystem = $this->app->make(Filesystem::class);
 
+        // Extract the base name without extension for glob pattern
+        $baseName = pathinfo($migrationFileName, PATHINFO_FILENAME);
+
         return Collection::make($this->app->databasePath() . DIRECTORY_SEPARATOR . 'migrations' . DIRECTORY_SEPARATOR)
-            ->flatMap(function ($path) use ($filesystem) {
-                return $filesystem->glob($path . '*_create_scorm_tables.php');
-            })->push($this->app->databasePath() . "/migrations/{$timestamp}_create_scorm_tables.php")
-            ->flatMap(function ($path) use ($filesystem, $migrationFileName) {
-                return $filesystem->glob($path . '*_' . $migrationFileName);
+            ->flatMap(function ($path) use ($filesystem, $baseName) {
+                return $filesystem->glob($path . '*_' . $baseName . '.php');
             })
             ->push($this->app->databasePath() . "/migrations/{$timestamp}_{$migrationFileName}")
             ->first();
