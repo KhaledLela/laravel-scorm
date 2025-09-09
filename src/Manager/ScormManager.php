@@ -224,16 +224,31 @@ class ScormManager
         if (!empty($scormData['scos']) && is_array($scormData['scos'])) {
             /** @var Sco $scoData */
             foreach ($scormData['scos'] as $scoData) {
-                $sco = $this->saveScormScos($scorm->id, $scoData);
-                if ($scoData->scoChildren) {
-                    foreach ($scoData->scoChildren as $scoChild) {
-                        $this->saveScormScos($scorm->id, $scoChild, $sco->id);
-                    }
-                }
+                $this->saveScormScosRecursively($scorm->id, $scoData);
             }
         }
 
         return  $scorm;
+    }
+
+    /**
+     * Save Scorm sco and it's nested children recursively
+     * @param int $scorm_id scorm id.
+     * @param Sco $scoData Sco data to be store.
+     * @param int $sco_parent_id sco parent id for children
+     */
+    private function saveScormScosRecursively($scorm_id, $scoData, $sco_parent_id = null)
+    {
+        $sco = $this->saveScormScos($scorm_id, $scoData, $sco_parent_id);
+        
+        // Recursively save children
+        if ($scoData->scoChildren && is_array($scoData->scoChildren)) {
+            foreach ($scoData->scoChildren as $scoChild) {
+                $this->saveScormScosRecursively($scorm_id, $scoChild, $sco->id);
+            }
+        }
+        
+        return $sco;
     }
 
     /**

@@ -109,10 +109,23 @@ class ScormLib
 
         foreach ($resources as $resource) {
             if (!is_null($resource->attributes)) {
-                $scormType = $resource->attributes->getNamedItemNS(
-                    $resource->lookupNamespaceUri('adlcp'),
-                    'scormType'
-                );
+                // Try to get the adlcp namespace URI
+                $adlcpNamespaceUri = $resource->lookupNamespaceUri('adlcp');
+                
+                // If adlcp namespace is not found, try common SCORM namespaces
+                if (empty($adlcpNamespaceUri)) {
+                    $adlcpNamespaceUri = 'http://www.adlnet.org/xsd/adlcp_v1p3';
+                }
+                
+                $scormType = null;
+                if (!empty($adlcpNamespaceUri)) {
+                    $scormType = $resource->attributes->getNamedItemNS($adlcpNamespaceUri, 'scormType');
+                }
+
+                // If still no scormType found, try without namespace (for SCORM 1.2)
+                if (is_null($scormType)) {
+                    $scormType = $resource->attributes->getNamedItem('scormType');
+                }
 
                 if (!is_null($scormType) && 'sco' === $scormType->nodeValue) {
                     $identifier = $resource->attributes->getNamedItem('identifier');
