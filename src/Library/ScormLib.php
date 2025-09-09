@@ -24,6 +24,8 @@ class ScormLib
         $organizationsList = $dom->getElementsByTagName('organizations');
         $resources = $dom->getElementsByTagName('resource');
 
+        \Log::info('parseOrganizationsNode: Found ' . $organizationsList->length . ' organizations and ' . $resources->length . ' resources');
+
         if ($organizationsList->length > 0) {
             $organizations = $organizationsList->item(0);
             $organization = $organizations->firstChild;
@@ -33,11 +35,14 @@ class ScormLib
                 && !is_null($organizations->attributes->getNamedItem('default'))
             ) {
                 $defaultOrganization = $organizations->attributes->getNamedItem('default')->nodeValue;
+                \Log::info('parseOrganizationsNode: Default organization found: ' . $defaultOrganization);
             } else {
                 $defaultOrganization = null;
+                \Log::info('parseOrganizationsNode: No default organization defined');
             }
             // No default organization is defined
             if (is_null($defaultOrganization)) {
+                \Log::info('parseOrganizationsNode: Looking for first organization...');
                 while (
                     !is_null($organization)
                     && 'organization' !== $organization->nodeName
@@ -46,12 +51,16 @@ class ScormLib
                 }
 
                 if (is_null($organization)) {
+                    \Log::info('parseOrganizationsNode: No organization found, falling back to parseResourceNodes');
                     return $this->parseResourceNodes($resources);
+                } else {
+                    \Log::info('parseOrganizationsNode: Found organization, proceeding with parseItemNodes');
                 }
             }
             // A default organization is defined
             // Look for it
             else {
+                \Log::info('parseOrganizationsNode: Looking for default organization: ' . $defaultOrganization);
                 while (
                     !is_null($organization)
                     && ('organization' !== $organization->nodeName
@@ -62,12 +71,17 @@ class ScormLib
                 }
 
                 if (is_null($organization)) {
+                    \Log::error('parseOrganizationsNode: Default organization not found: ' . $defaultOrganization);
                     throw new InvalidScormArchiveException('default_organization_not_found_message');
+                } else {
+                    \Log::info('parseOrganizationsNode: Found default organization, proceeding with parseItemNodes');
                 }
             }
 
+            \Log::info('parseOrganizationsNode: Calling parseItemNodes');
             return $this->parseItemNodes($organization, $resources);
         } else {
+            \Log::error('parseOrganizationsNode: No organizations found in manifest');
             throw new InvalidScormArchiveException('no_organization_found_message');
         }
     }
@@ -83,60 +97,94 @@ class ScormLib
     {
         $item = $source->firstChild;
         $scos = [];
+        $itemCount = 0;
+
+        \Log::info('parseItemNodes: Starting to parse items from organization');
 
         while (!is_null($item)) {
             if ('item' === $item->nodeName) {
+                $itemCount++;
+                \Log::info("parseItemNodes: Processing item #{$itemCount}");
+                
                 $sco = new Sco();
                 $scos[] = $sco;
                 $sco->setUuid(Str::uuid());
                 $sco->setScoParent($parentSco);
+                
+                \Log::info("parseItemNodes: Created SCO #{$itemCount} with UUID: " . $sco->getUuid());
+                
                 $this->findAttrParams($sco, $item, $resources);
                 $this->findNodeParams($sco, $item->firstChild);
 
+                \Log::info("parseItemNodes: SCO #{$itemCount} - identifier: " . $sco->getIdentifier() . ", title: " . $sco->getTitle() . ", isBlock: " . ($sco->isBlock() ? 'true' : 'false'));
+
                 if ($sco->isBlock()) {
-                    $sco->setScoChildren($this->parseItemNodes($item, $resources, $sco));
+                    \Log::info("parseItemNodes: SCO #{$itemCount} is a block, parsing children...");
+                    $children = $this->parseItemNodes($item, $resources, $sco);
+                    $sco->setScoChildren($children);
+                    \Log::info("parseItemNodes: SCO #{$itemCount} has " . count($children) . " children");
+                } else {
+                    \Log::info("parseItemNodes: SCO #{$itemCount} is not a block, entryUrl: " . $sco->getEntryUrl());
                 }
             }
             $item = $item->nextSibling;
         }
 
+        \Log::info("parseItemNodes: Finished parsing, found {$itemCount} items, returning " . count($scos) . " SCOs");
         return $scos;
     }
 
     private function parseResourceNodes(\DOMNodeList $resources)
     {
         $scos = [];
+        \Log::info('parseResourceNodes: Starting to parse ' . $resources->length . ' resources');
 
-        foreach ($resources as $resource) {
+        foreach ($resources as $index => $resource) {
+            \Log::info("parseResourceNodes: Processing resource #{$index}");
+
             if (!is_null($resource->attributes)) {
+                \Log::info("parseResourceNodes: Resource #{$index} has attributes");
+                
                 // Try to get the adlcp namespace URI
                 $adlcpNamespaceUri = $resource->lookupNamespaceUri('adlcp');
+                \Log::info("parseResourceNodes: Resource #{$index} adlcp namespace URI: " . ($adlcpNamespaceUri ?: 'null'));
                 
                 // If adlcp namespace is not found, try common SCORM namespaces
                 if (empty($adlcpNamespaceUri)) {
                     $adlcpNamespaceUri = 'http://www.adlnet.org/xsd/adlcp_v1p3';
+                    \Log::info("parseResourceNodes: Using fallback adlcp namespace URI: {$adlcpNamespaceUri}");
                 }
                 
                 $scormType = null;
                 if (!empty($adlcpNamespaceUri)) {
                     $scormType = $resource->attributes->getNamedItemNS($adlcpNamespaceUri, 'scormType');
+                    \Log::info("parseResourceNodes: Resource #{$index} scormType with namespace: " . ($scormType ? $scormType->nodeValue : 'null'));
                 }
 
                 // If still no scormType found, try without namespace (for SCORM 1.2)
                 if (is_null($scormType)) {
                     $scormType = $resource->attributes->getNamedItem('scormType');
+                    \Log::info("parseResourceNodes: Resource #{$index} scormType without namespace: " . ($scormType ? $scormType->nodeValue : 'null'));
                 }
 
                 if (!is_null($scormType) && 'sco' === $scormType->nodeValue) {
+                    \Log::info("parseResourceNodes: Resource #{$index} is a SCO, processing...");
+                    
                     $identifier = $resource->attributes->getNamedItem('identifier');
                     $href = $resource->attributes->getNamedItem('href');
 
+                    \Log::info("parseResourceNodes: Resource #{$index} identifier: " . ($identifier ? $identifier->nodeValue : 'null'));
+                    \Log::info("parseResourceNodes: Resource #{$index} href: " . ($href ? $href->nodeValue : 'null'));
+
                     if (is_null($identifier)) {
+                        \Log::error("parseResourceNodes: Resource #{$index} has no identifier");
                         throw new InvalidScormArchiveException('sco_with_no_identifier_message');
                     }
                     if (is_null($href)) {
+                        \Log::error("parseResourceNodes: Resource #{$index} has no href");
                         throw new InvalidScormArchiveException('sco_resource_without_href_message');
                     }
+                    
                     $sco = new Sco();
                     $sco->setUuid(Str::uuid());
                     $sco->setBlock(false);
@@ -145,10 +193,17 @@ class ScormLib
                     $sco->setTitle($identifier->nodeValue);
                     $sco->setEntryUrl($href->nodeValue);
                     $scos[] = $sco;
+                    
+                    \Log::info("parseResourceNodes: Successfully created SCO #{$index} with UUID: " . $sco->getUuid() . ", identifier: " . $sco->getIdentifier());
+                } else {
+                    \Log::info("parseResourceNodes: Resource #{$index} is not a SCO (scormType: " . ($scormType ? $scormType->nodeValue : 'null') . ")");
                 }
+            } else {
+                \Log::info("parseResourceNodes: Resource #{$index} has no attributes");
             }
         }
 
+        \Log::info('parseResourceNodes: Finished parsing, found ' . count($scos) . ' SCOs');
         return $scos;
     }
 

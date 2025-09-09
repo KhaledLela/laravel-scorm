@@ -222,10 +222,15 @@ class ScormManager
         $scorm->save();
 
         if (!empty($scormData['scos']) && is_array($scormData['scos'])) {
+            \Log::info('saveScorm: Starting to save ' . count($scormData['scos']) . ' SCOs');
             /** @var Sco $scoData */
-            foreach ($scormData['scos'] as $scoData) {
+            foreach ($scormData['scos'] as $index => $scoData) {
+                \Log::info("saveScorm: Saving SCO #{$index} with identifier: " . $scoData->getIdentifier());
                 $this->saveScormScosRecursively($scorm->id, $scoData);
             }
+            \Log::info('saveScorm: Finished saving all SCOs');
+        } else {
+            \Log::warning('saveScorm: No SCOs to save or scos is not an array');
         }
 
         return  $scorm;
@@ -239,13 +244,21 @@ class ScormManager
      */
     private function saveScormScosRecursively($scorm_id, $scoData, $sco_parent_id = null)
     {
+        \Log::info("saveScormScosRecursively: Saving SCO with identifier: " . $scoData->getIdentifier() . ", parent_id: " . ($sco_parent_id ?: 'null'));
+        
         $sco = $this->saveScormScos($scorm_id, $scoData, $sco_parent_id);
+        
+        \Log::info("saveScormScosRecursively: Successfully saved SCO with ID: " . $sco->id . ", UUID: " . $sco->uuid);
         
         // Recursively save children
         if ($scoData->scoChildren && is_array($scoData->scoChildren)) {
-            foreach ($scoData->scoChildren as $scoChild) {
+            \Log::info("saveScormScosRecursively: SCO has " . count($scoData->scoChildren) . " children, saving recursively...");
+            foreach ($scoData->scoChildren as $index => $scoChild) {
+                \Log::info("saveScormScosRecursively: Saving child #{$index} with identifier: " . $scoChild->getIdentifier());
                 $this->saveScormScosRecursively($scorm_id, $scoChild, $sco->id);
             }
+        } else {
+            \Log::info("saveScormScosRecursively: SCO has no children");
         }
         
         return $sco;
@@ -259,6 +272,8 @@ class ScormManager
      */
     private function saveScormScos($scorm_id, $scoData, $sco_parent_id = null)
     {
+        \Log::info("saveScormScos: Creating SCO model for identifier: " . $scoData->getIdentifier());
+        
         $sco    =   new ScormScoModel();
         $sco->scorm_id  =   $scorm_id;
         $sco->uuid  =   $scoData->uuid;
@@ -276,7 +291,12 @@ class ScormManager
         $sco->score_decimal  =   $scoData->scoreToPassDecimal;
         $sco->completion_threshold  =   $scoData->completionThreshold;
         $sco->prerequisites  =   $scoData->prerequisites;
+        
+        \Log::info("saveScormScos: SCO data prepared - UUID: " . $sco->uuid . ", identifier: " . $sco->identifier . ", title: " . $sco->title . ", entry_url: " . $sco->entry_url);
+        
         $sco->save();
+        
+        \Log::info("saveScormScos: SCO saved successfully with ID: " . $sco->id);
         return $sco;
     }
 
@@ -349,14 +369,28 @@ class ScormManager
         } else {
             $this->onError('invalid_scorm_version_message');
         }
+        \Log::info('parseScormArchive: Calling parseOrganizationsNode');
         $scos = $this->scormLib->parseOrganizationsNode($dom);
 
+        \Log::info('parseScormArchive: parseOrganizationsNode returned ' . count($scos) . ' SCOs');
+
         if (0 >= count($scos)) {
+            \Log::error('parseScormArchive: No SCOs found in SCORM archive');
             $this->onError('no_sco_in_scorm_archive_message');
+        }
+
+        // Log details about each SCO
+        foreach ($scos as $index => $sco) {
+            \Log::info("parseScormArchive: SCO #{$index} - identifier: " . $sco->getIdentifier() . ", title: " . $sco->getTitle() . ", entryUrl: " . $sco->getEntryUrl() . ", isBlock: " . ($sco->isBlock() ? 'true' : 'false'));
+            if ($sco->getScoChildren() && is_array($sco->getScoChildren())) {
+                \Log::info("parseScormArchive: SCO #{$index} has " . count($sco->getScoChildren()) . " children");
+            }
         }
 
         $data['entryUrl'] = $scos[0]->entryUrl ?? $scos[0]->scoChildren[0]->entryUrl;
         $data['scos'] = $scos;
+        
+        \Log::info('parseScormArchive: Final entryUrl: ' . $data['entryUrl']);
         
         // Include manifest path for later use in entry URL adjustment
         $data['manifestPath'] = $manifestResult['path'];
