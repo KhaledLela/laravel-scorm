@@ -212,8 +212,8 @@ class ScormLib
         foreach ($resources as $resource) {
             if (!is_null($resource->attributes)) {
                 $resourceType = $this->getResourceType($resource);
-                $identifier = $resource->attributes->getNamedItem('identifier');
-                $href = $resource->attributes->getNamedItem('href');
+                    $identifier = $resource->attributes->getNamedItem('identifier');
+                    $href = $resource->attributes->getNamedItem('href');
 
                 \Log::debug('parseResourceNodesWithStructure: Resource', [
                     'identifier' => $identifier ? $identifier->nodeValue : 'null',
@@ -572,12 +572,12 @@ class ScormLib
             return null;
         }
 
-        $sco = new Sco();
-        $sco->setUuid(Str::uuid());
-        $sco->setBlock(false);
-        $sco->setVisible(true);
-        $sco->setIdentifier($identifier->nodeValue);
-        $sco->setEntryUrl($href->nodeValue);
+                    $sco = new Sco();
+                    $sco->setUuid(Str::uuid());
+                    $sco->setBlock(false);
+                    $sco->setVisible(true);
+                    $sco->setIdentifier($identifier->nodeValue);
+                    $sco->setEntryUrl($href->nodeValue);
 
         // Extract additional parameters
         $this->extractResourceParameters($sco, $resource);
@@ -806,6 +806,14 @@ class ScormLib
             $sco->setBlock(false);
             // retrieve entry URL
             $sco->setEntryUrl($this->findEntryUrl($identifierRef->nodeValue, $resources));
+            
+            // Check if this SCO has multiple HTML files (slides/modules)
+            $htmlFiles = $this->findHtmlFilesInResource($identifierRef->nodeValue, $resources);
+            if (count($htmlFiles) > 1) {
+                \Log::info("findAttrParams: SCO " . $sco->getIdentifier() . " has " . count($htmlFiles) . " HTML files, creating child SCOs");
+                $childScos = $this->createChildScosFromHtmlFiles($htmlFiles, $sco);
+                $sco->setScoChildren($childScos);
+            }
         }
     }
 
@@ -886,5 +894,94 @@ class ScormLib
             }
         }
         throw new InvalidScormArchiveException('sco_without_resource_message');
+    }
+
+    /**
+     * Find HTML files in a resource
+     *
+     * @param string $identifierref
+     * @param \DOMNodeList $resources
+     * @return array
+     */
+    private function findHtmlFilesInResource($identifierref, \DOMNodeList $resources)
+    {
+        $htmlFiles = [];
+        
+        foreach ($resources as $resource) {
+            $identifier = $resource->attributes->getNamedItem('identifier');
+            
+            if (!is_null($identifier) && $identifier->nodeValue === $identifierref) {
+                // Find all file elements with .html extension
+                $fileElements = $resource->getElementsByTagName('file');
+                foreach ($fileElements as $file) {
+                    $href = $file->attributes->getNamedItem('href');
+                    if (!is_null($href) && preg_match('/\.html$/i', $href->nodeValue)) {
+                        $htmlFiles[] = $href->nodeValue;
+                    }
+                }
+                break;
+            }
+        }
+        
+        return $htmlFiles;
+    }
+
+    /**
+     * Create child SCOs from HTML files
+     *
+     * @param array $htmlFiles
+     * @param Sco $parentSco
+     * @return array
+     */
+    private function createChildScosFromHtmlFiles($htmlFiles, Sco $parentSco)
+    {
+        $childScos = [];
+        
+        foreach ($htmlFiles as $index => $htmlFile) {
+            $childSco = new Sco();
+            $childSco->setUuid(Str::uuid());
+            $childSco->setScoParent($parentSco);
+            $childSco->setBlock(false);
+            $childSco->setVisible(true);
+            
+            // Create identifier based on parent and slide number
+            $slideNumber = $index + 1;
+            $childSco->setIdentifier($parentSco->getIdentifier() . '_' . $slideNumber);
+            
+            // Create title based on filename
+            $title = $this->generateSlideTitle($htmlFile, $slideNumber);
+            $childSco->setTitle($title);
+            
+            // Set entry URL to the HTML file
+            $childSco->setEntryUrl($htmlFile);
+            
+            $childScos[] = $childSco;
+            
+            \Log::info("createChildScosFromHtmlFiles: Created child SCO - " . $childSco->getIdentifier() . " (" . $childSco->getTitle() . ")");
+        }
+        
+        return $childScos;
+    }
+
+    /**
+     * Generate a meaningful title for a slide based on filename
+     *
+     * @param string $htmlFile
+     * @param int $slideNumber
+     * @return string
+     */
+    private function generateSlideTitle($htmlFile, $slideNumber)
+    {
+        // Remove .html extension and convert to readable format
+        $baseName = pathinfo($htmlFile, PATHINFO_FILENAME);
+        
+        // Convert underscores to spaces and capitalize words
+        $title = str_replace('_', ' ', $baseName);
+        $title = ucwords($title);
+        
+        // Handle special cases
+        $title = str_replace('Html', 'HTML', $title);
+        
+        return "Slide {$slideNumber}: {$title}";
     }
 }
