@@ -883,42 +883,44 @@ class ScormManager
      */
     private function extractCreationDate(DOMDocument $dom)
     {
-        $xpath = new \DOMXPath($dom);
-        
-        // Register common SCORM namespaces
-        $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
-        $xpath->registerNamespace('adlcp', 'http://www.adlnet.org/xsd/adlcp_v1p3');
-        $xpath->registerNamespace('adlseq', 'http://www.adlnet.org/xsd/adlseq_v1p3');
-        $xpath->registerNamespace('adlnav', 'http://www.adlnet.org/xsd/adlnav_v1p3');
-        
-        // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:date/lom:dateTime
-        // Priority 1: Creator/Author contribution date
-        $dateNodes = $xpath->query('//lom:dateTime[ancestor::lom:contribute[lom:role/lom:value[text()="creator" or text()="author"]]]');
-        if ($dateNodes->length > 0) {
-            return $this->formatDate($dateNodes->item(0)->textContent);
-        }
-        
-        // Priority 2: Any contribution date
-        $dateNodes = $xpath->query('//lom:dateTime[ancestor::lom:contribute]');
-        if ($dateNodes->length > 0) {
-            return $this->formatDate($dateNodes->item(0)->textContent);
-        }
-        
-        // Priority 3: Any dateTime in metadata
-        $dateNodes = $xpath->query('//lom:dateTime');
-        if ($dateNodes->length > 0) {
-            return $this->formatDate($dateNodes->item(0)->textContent);
-        }
-        
-        // SCORM 1.2: Look for <schema> and <schemaversion> to get creation context
-        $schemaNodes = $xpath->query('//schema');
-        if ($schemaNodes->length > 0) {
-            $schema = $schemaNodes->item(0)->textContent;
-            if (strpos($schema, 'ADL SCORM') !== false) {
-                // For SCORM 1.2, we might not have creation date in manifest
-                // Return null as it's not standard in SCORM 1.2
-                return null;
+        try {
+            $xpath = new \DOMXPath($dom);
+            
+            // Register common SCORM namespaces with error handling
+            $this->registerScormNamespaces($xpath);
+            
+            // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:date/lom:dateTime
+            // Priority 1: Creator/Author contribution date
+            $dateNodes = $this->safeXPathQuery($xpath, '//lom:dateTime[ancestor::lom:contribute[lom:role/lom:value[text()="creator" or text()="author"]]]');
+            if ($dateNodes && $dateNodes->length > 0) {
+                return $this->formatDate($dateNodes->item(0)->textContent);
             }
+            
+            // Priority 2: Any contribution date
+            $dateNodes = $this->safeXPathQuery($xpath, '//lom:dateTime[ancestor::lom:contribute]');
+            if ($dateNodes && $dateNodes->length > 0) {
+                return $this->formatDate($dateNodes->item(0)->textContent);
+            }
+            
+            // Priority 3: Any dateTime in metadata
+            $dateNodes = $this->safeXPathQuery($xpath, '//lom:dateTime');
+            if ($dateNodes && $dateNodes->length > 0) {
+                return $this->formatDate($dateNodes->item(0)->textContent);
+            }
+            
+            // SCORM 1.2: Look for <schema> and <schemaversion> to get creation context
+            $schemaNodes = $this->safeXPathQuery($xpath, '//schema');
+            if ($schemaNodes && $schemaNodes->length > 0) {
+                $schema = $schemaNodes->item(0)->textContent;
+                if (strpos($schema, 'ADL SCORM') !== false) {
+                    // For SCORM 1.2, we might not have creation date in manifest
+                    // Return null as it's not standard in SCORM 1.2
+                    return null;
+                }
+            }
+            
+        } catch (\Exception $e) {
+            \Log::warning('extractCreationDate: Error extracting creation date - ' . $e->getMessage());
         }
         
         return null;
@@ -929,51 +931,53 @@ class ScormManager
      */
     private function extractCreator(DOMDocument $dom)
     {
-        $xpath = new \DOMXPath($dom);
-        
-        // Register common SCORM namespaces
-        $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
-        $xpath->registerNamespace('adlcp', 'http://www.adlnet.org/xsd/adlcp_v1p3');
-        $xpath->registerNamespace('adlseq', 'http://www.adlnet.org/xsd/adlseq_v1p3');
-        $xpath->registerNamespace('adlnav', 'http://www.adlnet.org/xsd/adlnav_v1p3');
-        
-        // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:entity
-        // Priority 1: Creator role
-        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="creator"]]]');
-        if ($entityNodes->length > 0) {
-            return trim($entityNodes->item(0)->textContent);
-        }
-        
-        // Priority 2: Author role
-        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="author"]]]');
-        if ($entityNodes->length > 0) {
-            return trim($entityNodes->item(0)->textContent);
-        }
-        
-        // Priority 3: Publisher role
-        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="publisher"]]]');
-        if ($entityNodes->length > 0) {
-            return trim($entityNodes->item(0)->textContent);
-        }
-        
-        // Priority 4: Any entity in contribute section
-        $entityNodes = $xpath->query('//lom:entity[ancestor::lom:contribute]');
-        if ($entityNodes->length > 0) {
-            return trim($entityNodes->item(0)->textContent);
-        }
-        
-        // Priority 5: Any entity in metadata
-        $entityNodes = $xpath->query('//lom:entity');
-        if ($entityNodes->length > 0) {
-            return trim($entityNodes->item(0)->textContent);
-        }
-        
-        // SCORM 1.2: Look for organization or other creator information
-        // SCORM 1.2 typically doesn't have detailed creator metadata
-        $orgNodes = $xpath->query('//organization');
-        if ($orgNodes->length > 0) {
-            // For SCORM 1.2, we might not have creator info in manifest
-            return null;
+        try {
+            $xpath = new \DOMXPath($dom);
+            
+            // Register common SCORM namespaces with error handling
+            $this->registerScormNamespaces($xpath);
+            
+            // SCORM 2004: Look for lom:lom/lom:lifeCycle/lom:contribute/lom:entity
+            // Priority 1: Creator role
+            $entityNodes = $this->safeXPathQuery($xpath, '//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="creator"]]]');
+            if ($entityNodes && $entityNodes->length > 0) {
+                return trim($entityNodes->item(0)->textContent);
+            }
+            
+            // Priority 2: Author role
+            $entityNodes = $this->safeXPathQuery($xpath, '//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="author"]]]');
+            if ($entityNodes && $entityNodes->length > 0) {
+                return trim($entityNodes->item(0)->textContent);
+            }
+            
+            // Priority 3: Publisher role
+            $entityNodes = $this->safeXPathQuery($xpath, '//lom:entity[ancestor::lom:contribute[lom:role/lom:value[text()="publisher"]]]');
+            if ($entityNodes && $entityNodes->length > 0) {
+                return trim($entityNodes->item(0)->textContent);
+            }
+            
+            // Priority 4: Any entity in contribute section
+            $entityNodes = $this->safeXPathQuery($xpath, '//lom:entity[ancestor::lom:contribute]');
+            if ($entityNodes && $entityNodes->length > 0) {
+                return trim($entityNodes->item(0)->textContent);
+            }
+            
+            // Priority 5: Any entity in metadata
+            $entityNodes = $this->safeXPathQuery($xpath, '//lom:entity');
+            if ($entityNodes && $entityNodes->length > 0) {
+                return trim($entityNodes->item(0)->textContent);
+            }
+            
+            // SCORM 1.2: Look for organization or other creator information
+            // SCORM 1.2 typically doesn't have detailed creator metadata
+            $orgNodes = $this->safeXPathQuery($xpath, '//organization');
+            if ($orgNodes && $orgNodes->length > 0) {
+                // For SCORM 1.2, we might not have creator info in manifest
+                return null;
+            }
+            
+        } catch (\Exception $e) {
+            \Log::warning('extractCreator: Error extracting creator - ' . $e->getMessage());
         }
         
         return null;
@@ -995,6 +999,34 @@ class ScormManager
         } catch (\Exception $e) {
             // If parsing fails, return the original string
             return trim($dateString);
+        }
+    }
+
+    /**
+     * Register SCORM namespaces safely
+     */
+    private function registerScormNamespaces(\DOMXPath $xpath)
+    {
+        try {
+            $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
+            $xpath->registerNamespace('adlcp', 'http://www.adlnet.org/xsd/adlcp_v1p3');
+            $xpath->registerNamespace('adlseq', 'http://www.adlnet.org/xsd/adlseq_v1p3');
+            $xpath->registerNamespace('adlnav', 'http://www.adlnet.org/xsd/adlnav_v1p3');
+        } catch (\Exception $e) {
+            \Log::warning('registerScormNamespaces: Error registering namespaces - ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Execute XPath query safely with error handling
+     */
+    private function safeXPathQuery(\DOMXPath $xpath, $query)
+    {
+        try {
+            return $xpath->query($query);
+        } catch (\Exception $e) {
+            \Log::warning('safeXPathQuery: Error executing XPath query "' . $query . '" - ' . $e->getMessage());
+            return false;
         }
     }
 
