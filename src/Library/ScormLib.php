@@ -936,7 +936,10 @@ class ScormLib
                 foreach ($fileElements as $file) {
                     $href = $file->attributes->getNamedItem('href');
                     if (!is_null($href) && preg_match('/\.html$/i', $href->nodeValue)) {
-                        $htmlFiles[] = $href->nodeValue;
+                        // Skip index.html as it's the main entry point
+                        if (strtolower($href->nodeValue) !== 'index.html') {
+                            $htmlFiles[] = $href->nodeValue;
+                        }
                     }
                 }
                 break;
