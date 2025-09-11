@@ -145,8 +145,15 @@ class ScormLib
         $xpath = new \DOMXPath($dom);
 
         // Get all namespace declarations
-        foreach ($xpath->query('namespace::*', $manifestNode) as $node) {
-            $this->namespaces[$node->localName] = $node->nodeValue;
+        try {
+            $namespaceNodes = $xpath->query('namespace::*', $manifestNode);
+            if ($namespaceNodes) {
+                foreach ($namespaceNodes as $node) {
+                    $this->namespaces[$node->localName] = $node->nodeValue;
+                }
+            }
+        } catch (\Exception $e) {
+            \Log::warning('extractNamespaces: Error extracting namespaces - ' . $e->getMessage());
         }
 
         \Log::info('extractNamespaces: Found namespaces: ' . json_encode($this->namespaces));
@@ -659,6 +666,14 @@ class ScormLib
     private function findTitleInMetadata(\DOMNode $metadata)
     {
         $xpath = new \DOMXPath($metadata->ownerDocument);
+        
+        // Register namespaces safely
+        try {
+            $xpath->registerNamespace('lom', 'http://ltsc.ieee.org/xsd/LOM');
+            $xpath->registerNamespace('dc', 'http://purl.org/dc/elements/1.1/');
+        } catch (\Exception $e) {
+            \Log::warning('findTitleInMetadata: Error registering namespaces - ' . $e->getMessage());
+        }
 
         // Try different title paths
         $titlePaths = [
@@ -669,9 +684,14 @@ class ScormLib
         ];
 
         foreach ($titlePaths as $path) {
-            $titles = $xpath->query($path, $metadata);
-            if ($titles && $titles->length > 0) {
-                return trim($titles->item(0)->nodeValue);
+            try {
+                $titles = $xpath->query($path, $metadata);
+                if ($titles && $titles->length > 0) {
+                    return trim($titles->item(0)->nodeValue);
+                }
+            } catch (\Exception $e) {
+                \Log::warning('extractTitleFromMetadata: Error executing XPath query "' . $path . '" - ' . $e->getMessage());
+                continue;
             }
         }
 
